@@ -92,7 +92,7 @@ Mode A MUST NOT require TAP-10. If the answer is a file, read the file.
 
 Rules:
 
-1. `id` is computed by the caller — a commitment to the request, not a random value — and the response MUST echo the same `id`.
+1. `id` is computed by the caller — a correlation identifier committing to the endpoint pair, the `nonce` and `params`, not a random value — and the response MUST echo the same `id`.
 2. `id` MUST be `sha256("deweb.req/v0" ‖ endpointID(from) ‖ endpointID(to) ‖ nonce ‖ utf8(JCS(params)))` — 32 bytes, written `0x`-prefixed lowercase hex — so both sides recompute the same bytes: the caller to derive `id`, the recipient to check the request it opened against it. `‖` is byte concatenation and ASCII labels are raw bytes, as in TAP-10 §1:
    - `endpointID(x)` is the 32-byte endpoint ID of TAP-10 §2.2 (`uint32(0) ‖ uint64(chainId) ‖ container`) — never the display form. `from` is the sending container and `to` the recipient container; the caller knows both, and the recipient reads both from the verified entry (TAP-10 §5.3).
    - `nonce` is a request field defined here: exactly 32 bytes, fresh for every request and never reused, carried as `0x`-prefixed lowercase hex (66 characters) and hashed as its 32 raw bytes.
