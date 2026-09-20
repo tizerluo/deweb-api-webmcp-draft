@@ -1,11 +1,11 @@
 # Draft: request/response content on TAP-10
 
-Status: **unofficial draft** (2026-09-20; rev. 2026-09-21 — pre-discussion corrections vs TAP-10 v1.0 §6 and SPEC §7.8)  
+Status: **unofficial draft** (2026-09-20; rev. 2026-09-21b — pre-discussion corrections + Round-1 review fixes vs TAP-10 v1.0 §1/§2.2/§6 and SPEC §7.5/§7.8)  
 Working name used in discussion: “TapeAPI” / “TAP-11” — **number not assigned**  
 Depends on: TAP-10 TapeSend / the DeWEB messaging layer ([TapeKit/send](https://github.com/TapeOutProtocol/TapeKit/tree/main/send); v1.0 rewrite in progress)  
 Does not change: TapeKit SPEC §15.1 promises (names, verification, node agreement)
 
-English is the intended normative language if this is later merged. Chinese follows.
+English is the normative text of this draft. The Chinese text in this document is a non-normative summary; the rules are defined in English only.
 
 ---
 
@@ -28,7 +28,7 @@ DeWEB 站点能发文件，容器能发 TAP-10 信。缺的是约定「这封信
 
 A provider MAY publish `/.tape/api.json` in its site store (same SHA-256 rules as any DeWEB file).
 
-> **Reserved-path note (please read first).** SPEC §7.8 today reserves the `/.tape/` prefix to the gateway — “files under those names in a site are never read” — and gateways serve their own files there (`boot.js`, `pages.js`, `config.json`, `kernel/…`, `status`, …). This draft therefore **asks for an explicit carve-out**: `/.tape/api.json` (and `/.tape/mcp.json` in the WebMCP draft) are site-declared files read by the kernel **from the site store (chain)**, while HTTP requests under `/.tape/` keep going to the gateway. If maintainers prefer another, non-reserved path, that choice belongs in this discussion. 中文：`/.tape/` 前缀目前保留给网关（站点里这些名字的文件「永不读取」，SPEC §7.8）；草案请求明确开一条口子——这两个文件由内核从链上读，HTTP 命名空间仍归网关。若维护者想换非保留路径，也在这里讨论定。
+> **Reserved-path note (please read first).** SPEC §7.8 today reserves `/sw.js` and the whole `/.tape/` prefix to the gateway — “files under those names in a site are never read”. In the current gateway (0.3.x) that namespace holds static resources served from the host (`boot.js`, `pages.js`, `config.json`, `blocklist.txt`, `policy.html`, `kernel/*`) and generated endpoints (`status`, `settings`, `csp-report`). This draft therefore **asks for an explicit carve-out**: `/.tape/api.json` (and `/.tape/mcp.json` in the WebMCP draft) are site-declared files read by the kernel **from the site store (chain)**, while HTTP requests under `/.tape/` keep going to the gateway. If maintainers prefer another, non-reserved path, that choice belongs in this discussion. 中文：`/sw.js` 与整个 `/.tape/` 前缀目前归网关保留（站点里这些名字的文件「永不读取」，SPEC §7.8）；现状里这一命名空间既有静态资源（`boot.js`、`pages.js`、`config.json`、`blocklist.txt`、`policy.html`、`kernel/*`）也有网关生成的端点（`status`、`settings`、`csp-report`）。草案请求明确开一条口子——这两个文件由内核从链上读，HTTP 命名空间仍归网关。若维护者想换非保留路径，也在这里讨论定。
 
 ```json
 {
@@ -73,6 +73,7 @@ Mode A MUST NOT require TAP-10. If the answer is a file, read the file.
 {
   "kind": "deweb.req/v0",
   "id": "0x…",
+  "nonce": "0x…",
   "method": "translate",
   "params": { "text": "hello", "from": "en", "to": "zh" },
   "replyTo": "#8801@0",
@@ -91,8 +92,12 @@ Mode A MUST NOT require TAP-10. If the answer is a file, read the file.
 
 Rules:
 
-1. `id` is chosen by the caller; the response MUST echo the same `id`.
-2. `id` SHOULD be `sha256("deweb.req/v0" ‖ from ‖ to ‖ nonce ‖ canon(params))` or equivalent, so the caller can prove the request — with `canon` an explicitly defined canonical serialization (member order, whitespace, number forms — e.g. RFC 8785 JCS). Without a canonical form the two sides compute different bytes.
+1. `id` is computed by the caller — a commitment to the request, not a random value — and the response MUST echo the same `id`.
+2. `id` MUST be `sha256("deweb.req/v0" ‖ endpointID(from) ‖ endpointID(to) ‖ nonce ‖ utf8(JCS(params)))` — 32 bytes, written `0x`-prefixed lowercase hex — so both sides recompute the same bytes: the caller to derive `id`, the recipient to check the request it opened against it. `‖` is byte concatenation and ASCII labels are raw bytes, as in TAP-10 §1:
+   - `endpointID(x)` is the 32-byte endpoint ID of TAP-10 §2.2 (`uint32(0) ‖ uint64(chainId) ‖ container`) — never the display form. `from` is the sending container and `to` the recipient container; the caller knows both, and the recipient reads both from the verified entry (TAP-10 §5.3).
+   - `nonce` is a request field defined here: exactly 32 bytes, fresh for every request and never reused, carried as `0x`-prefixed lowercase hex (66 characters) and hashed as its 32 raw bytes.
+   - `JCS(params)` is the RFC 8785 (JCS) serialization of `params`, hashed as its UTF-8 bytes; JCS is mandatory — with an “or equivalent” canonicalization the two sides could hash different bytes.
+   The four leading fields are fixed-length (12 + 32 + 32 + 32 bytes) and `params` is the only variable-length field, last in the preimage, so every field boundary is unambiguous. `method`, `replyTo` and `deadline` stay outside the preimage: `id` commits to the endpoint pair, the `nonce` and `params`.
 3. The TAP-10 envelope (payload format `0x02`, encryption, digest, inbox index, the 16,000-byte payload cap) is unchanged. See TAP-10 §5.
 4. `deadline` is a block height on the chain the request was sent on (the sender’s chain). A caller MUST compare it against that chain’s finalized height (TAP-10 §7) and treat silence after it as failure.
 5. Assets MAY be TAP-10 attachments (§6.1 formats). This draft does **not** specify an escrow contract; until one exists, payment is out of band or omitted. Baseline cost of any request: a send is a wallet transaction from the sender’s wallet (TAP-10 §10 — signature + gas; roughly 0.004 USD at typical BNB fee levels, §11), and the request metadata (who, when, size) is public and permanent. “Free” means no price attached, not no cost.
